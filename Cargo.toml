@@ -8,3 +8,8 @@ author = "abhi"
 
 [dependencies]
 pnet = "0.28.0"
+thiserror = "1.0.24"
+
+[[test]]
+name = "ping"
+path = "tests/test_sending_recving.rs"
