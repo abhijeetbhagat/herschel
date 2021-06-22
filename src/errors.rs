@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum PmtudError {
     #[error("error setting up an association: {0}")]
     PmtudLayer3TransportInitError(String),
