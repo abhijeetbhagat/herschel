@@ -5,7 +5,9 @@ fn test_icmp() {
     match Pmtud::new("142.250.183.3".parse().unwrap()) {
         Err(e) => println!("err is {}", e),
         Ok(mut pmtud) => {
-            assert!(pmtud.discover().is_ok());
+            let result = pmtud.discover();
+            assert!(result.is_ok());
+            assert_eq!(result, Ok(1492u16));
         }
     };
 }
