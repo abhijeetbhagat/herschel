@@ -38,9 +38,9 @@ impl Pmtud {
     }
 
     pub fn discover(&mut self) -> Result<u16, PmtudError> {
-        const icmp_payload_len: usize = 1465; // "abcdefghijklmnopqrstuvwabcdefghi".as_bytes();
+        const icmp_payload_len: usize = 1472; // we start with 1500 (ethernet mtu) - 28 (ip header + icmp header) bytes of payload
         let payload = [0; icmp_payload_len];
-        // header 8 bytes + payload (above) 65500 bytes
+        // header 8 bytes + payload above
         let total_icmp_packet_len = 8 + icmp_payload_len;
 
         let mut icmp_packet =
@@ -55,8 +55,44 @@ impl Pmtud {
         let chksum = checksum(&icmp_packet.packet(), 16); // checksum starts at offset 16
         icmp_packet.set_checksum(0xf7ff);
 
-        let mut packet = vec![0u8; 20 + total_icmp_packet_len]; // 20 bytes header + 40 bytes icmp
-        let mut packet = MutableIpv4Packet::new(&mut packet).unwrap();
+
+        println!("sending ip packet to host {}", self.destination);
+        let mut adjusted_icmp_payload_len = icmp_payload_len;
+        let mut ipv4_packet = self.get_packet(adjusted_icmp_payload_len, icmp_packet.packet());
+
+        loop {
+            match self.tx.send_to(ipv4_packet, self.destination.into()) {
+                Err(e) => {
+                    println!(
+                    "there was a problem sending the ip packet to destination - {}", e
+                    );
+                    adjusted_icmp_payload_len = adjusted_icmp_payload_len - 28;
+                    ipv4_packet = self.get_packet(adjusted_icmp_payload_len, &icmp_packet.packet()[0..adjusted_icmp_payload_len]);
+                },
+                Ok(size) => {
+                    if let Ok((packet, addr)) = ipv4_packet_iter(&mut self.rx).next() {
+                        println!("packet recvd: {:?}", packet);
+                        println!("payload recvd: {:?}", packet.payload());
+                        if let Some(icmp_packet) = DestinationUnreachablePacket::new(packet.payload()) {
+                            println!("converted packet");
+                            let unused = icmp_packet.get_unused();
+                            let next_hop_mtu = (unused & 0x0000ffff) as u16;
+                            return Ok(next_hop_mtu) 
+                        } else {
+                            return Ok(icmp_payload_len as u16)
+                        }
+                    } else {
+                        return Err(PmtudError::PmtudRecvError);
+                    }
+                }
+            }
+        }
+
+    }
+
+    fn get_packet(&self, total_icmp_packet_len: usize, payload: &[u8]) -> MutableIpv4Packet  {
+        let packet = vec![0u8; 20 + total_icmp_packet_len]; // 20 bytes header + 40 bytes icmp
+        let mut packet = MutableIpv4Packet::owned(packet).unwrap();
         packet.set_version(4);
         packet.set_header_length(5);
         packet.set_dscp(0); // standard diff service class
@@ -69,32 +105,9 @@ impl Pmtud {
         packet.set_next_level_protocol(Icmp);
         packet.set_source("192.168.1.10".parse().unwrap()); // nats can change this address
         packet.set_destination(self.destination);
-        packet.set_payload(icmp_packet.packet());
+        packet.set_payload(payload);
         // the routers will recalc the checksum before forwarding since they decrease ttl by 1
         packet.set_checksum(ipv4_checksum(&packet.to_immutable()));
-        println!("sending ip packet to host {}", self.destination);
-        match self.tx.send_to(packet, self.destination.into()) {
-            Err(e) => println!(
-                "there was a problem sending the ip packet to destination - {}",
-                e
-            ),
-            Ok(size) => {
-                if let Ok((packet, addr)) = ipv4_packet_iter(&mut self.rx).next() {
-                    println!("packet recvd: {:?}", packet);
-                    println!("payload recvd: {:?}", packet.payload());
-                    if let Some(icmp_packet) = DestinationUnreachablePacket::new(packet.payload()) {
-                        println!("converted packet");
-                        let unused = icmp_packet.get_unused();
-                        let next_hop_mtu = (unused & 0x0000ffff) as u16;
-                        return Ok(next_hop_mtu)
-                    } else {
-                        println!("conversion failed");
-                    }
-                } else {
-                    return Err(PmtudError::PmtudRecvError);
-                }
-            }
-        }
-        Ok(1500)
+        packet
     }
 }
