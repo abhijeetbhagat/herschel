@@ -58,7 +58,7 @@ impl Pmtud {
 
         println!("sending ip packet to host {}", self.destination);
         let mut adjusted_icmp_payload_len = icmp_payload_len;
-        let mut ipv4_packet = self.get_packet(adjusted_icmp_payload_len, icmp_packet.packet());
+        let mut ipv4_packet = Pmtud::get_packet(adjusted_icmp_payload_len, icmp_packet.packet(), self.destination);
 
         loop {
             match self.tx.send_to(ipv4_packet, self.destination.into()) {
@@ -67,7 +67,7 @@ impl Pmtud {
                     "there was a problem sending the ip packet to destination - {}", e
                     );
                     adjusted_icmp_payload_len = adjusted_icmp_payload_len - 28;
-                    ipv4_packet = self.get_packet(adjusted_icmp_payload_len, &icmp_packet.packet()[0..adjusted_icmp_payload_len]);
+                    ipv4_packet = Pmtud::get_packet(adjusted_icmp_payload_len, &icmp_packet.packet()[0..adjusted_icmp_payload_len], self.destination);
                 },
                 Ok(size) => {
                     if let Ok((packet, addr)) = ipv4_packet_iter(&mut self.rx).next() {
@@ -90,7 +90,7 @@ impl Pmtud {
 
     }
 
-    fn get_packet(&self, total_icmp_packet_len: usize, payload: &[u8]) -> MutableIpv4Packet  {
+    fn get_packet(total_icmp_packet_len: usize, payload: &[u8], destination: Ipv4Addr) -> MutableIpv4Packet  {
         let packet = vec![0u8; 20 + total_icmp_packet_len]; // 20 bytes header + 40 bytes icmp
         let mut packet = MutableIpv4Packet::owned(packet).unwrap();
         packet.set_version(4);
@@ -104,7 +104,7 @@ impl Pmtud {
         packet.set_ttl(10); // in seconds
         packet.set_next_level_protocol(Icmp);
         packet.set_source("192.168.1.10".parse().unwrap()); // nats can change this address
-        packet.set_destination(self.destination);
+        packet.set_destination(destination);
         packet.set_payload(payload);
         // the routers will recalc the checksum before forwarding since they decrease ttl by 1
         packet.set_checksum(ipv4_checksum(&packet.to_immutable()));
