@@ -15,3 +15,7 @@ env_logger = "0.8.3"
 [[test]]
 name = "ping"
 path = "tests/test_sending_recving.rs"
+
+[[test]]
+name = "ips"
+path = "tests/test_get_local_ip.rs"
